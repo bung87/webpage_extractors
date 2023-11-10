@@ -217,7 +217,7 @@ proc extractContentBasic*(s: string, textOnly = false): string =
   # echo filtered
   # let m3 = filtered[int(ceil(filtered.len.float - 1.0) / 6)].index.float
   # / ln( abs(it.index.float - m3)  + 2)
-  var sorted = filtered.sortByIt(computeScore(it))
+  var sorted = filtered.sortedByIt(computeScore(it))
   # echo sorted
   let finalLen = sorted.len
   if finalLen > 0:
