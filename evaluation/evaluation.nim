@@ -17,7 +17,7 @@ when defined(ExtractAll):
     let c = value["articleBody"].getStr
     let content = readFile(p)
     let uncompresssed = uncompress(content)
-    let output = extractContent(uncompresssed, textOnly = true)
+    let output = extractContentBasic(uncompresssed, textOnly = true)
     if output == c:
       inc exactCount
     elif output.len == 0:

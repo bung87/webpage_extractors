@@ -8,6 +8,7 @@ type ParsedNode {.acyclic.} = ref object
   childLen: int
   nonLinkLen: int
   depth: int
+  punctuations: int
   pLen: int
   index: int
   parent: ParsedNode
@@ -33,6 +34,7 @@ proc traverse(parsedNodes: var seq[ParsedNode], node: XmlNode, parent: ParsedNod
       parent.pLen.inc pnode.pLen
       parent.nonLinkLen.inc pnode.nonLinkLen
       parent.textLen.inc pnode.textLen
+      parent.punctuations.inc pnode.punctuations
   of xnText:
     var add = true
     var p {.cursor.} = parent
@@ -60,7 +62,7 @@ proc traverse(parsedNodes: var seq[ParsedNode], node: XmlNode, parent: ParsedNod
         else:
           break
       parent.textLen.inc text.len - count
-      
+      parent.punctuations = count(text, {',','.','!'})
       if text.len - count > 1:
         parent.pLen.inc
         parent.nonLinkLen.inc 1
@@ -171,8 +173,8 @@ proc computeScore(it: ParsedNode): float =
   let textTagsScore = ln(float(it.pLen + 2))
   # let depthScore = ln(float(it.depth + 2))
   # let punctuationsDensity = float(ln(max(count(it.node.innerText(), PunctuationChars),2).float))
-  # let punctuationsDensity = float(ln(max( it.textLen / count(it.node.innerText(), {',','.','!'}), 2).float))
-  result = textDensity * textTagsScore #* depthScore
+  let punctuationsDensity = float(ln(max( it.textLen / (it.punctuations + 1), 2).float))
+  result = textDensity * textTagsScore * punctuationsDensity #* depthScore
 
 proc extractContentBasic*(s: string, textOnly = false): string =
   var errors = newSeq[string]()
@@ -215,7 +217,7 @@ proc extractContentBasic*(s: string, textOnly = false): string =
   # echo filtered
   # let m3 = filtered[int(ceil(filtered.len.float - 1.0) / 6)].index.float
   # / ln( abs(it.index.float - m3)  + 2)
-  var sorted = filtered.sortedByIt(computeScore(it) )
+  var sorted = filtered.sortByIt(computeScore(it))
   # echo sorted
   let finalLen = sorted.len
   if finalLen > 0:
