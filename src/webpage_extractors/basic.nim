@@ -1,6 +1,7 @@
-import std/[xmltree, strformat, algorithm, sequtils, streams, parsexml, unicode, math, stats, re]
+import std/[xmltree, strformat, algorithm, sequtils, streams, unicode, math, stats, re]
 import std/strutils
-import pkg/htmlparser
+import std/parsexml
+import std/htmlparser
 
 type ParsedNode {.acyclic.} = ref object
   node: XmlNode
@@ -154,8 +155,8 @@ proc findBody(s: sink string): string =
     result = findTag(result, tag)
   
   result = result.multiReplace([
-    (re"<head[\s\S]*?>[\s\S]*?<\/head>", ""),
-    (re"<script[\s\S]*?>[\s\S]*?<\/script>", "<script></script>"),
+    (re"<head\b[^<]*(?:(?!<\/head>)<[^<]*)*<\/head>", "<head></head>"),
+    (re"<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>", "<script></script>"),
     (re"<link[\s\S]*?>", ""),
     (re"<noscript[\s\S]*?>[\s\S]*?<\/noscript>", "<noscript></noscript>"),
     (re"<style[\s\S]*?>[\s\S]*?<\/style>", ""),
