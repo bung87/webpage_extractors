@@ -1,4 +1,4 @@
-import std/[xmltree, strformat, algorithm, sequtils, streams, unicode, math, stats, re]
+import std/[xmltree, strformat, algorithm, sequtils, streams, unicode, math, stats, strtabs, re]
 import std/strutils
 import std/parsexml
 import std/htmlparser
@@ -12,6 +12,7 @@ type ParsedNode {.acyclic.} = ref object
   punctuations: int
   pLen: int
   index: int
+  articleBody: bool
   parent: ParsedNode
 
 proc `$`*(n: ParsedNode): string =
@@ -29,13 +30,18 @@ proc traverse(parsedNodes: var seq[ParsedNode], node: XmlNode, parent: ParsedNod
     pnode.parent = parent
     pnode.childLen = node.len()
     parsedNodes.add pnode
-    for n in node:
-      traverse(parsedNodes, n, pnode)
-    if parent != nil:
-      parent.pLen.inc pnode.pLen
-      parent.nonLinkLen.inc pnode.nonLinkLen
-      parent.textLen.inc pnode.textLen
-      parent.punctuations.inc pnode.punctuations
+    let attrs = node.attrs()
+    if attrs != nil:
+      if attrs.getOrDefault("itemprop") == "articleBody":
+        pnode.articleBody = true
+    if not pnode.articleBody:
+      for n in node:
+        traverse(parsedNodes, n, pnode)
+      if parent != nil:
+        parent.pLen.inc pnode.pLen
+        parent.nonLinkLen.inc pnode.nonLinkLen
+        parent.textLen.inc pnode.textLen
+        parent.punctuations.inc pnode.punctuations
   of xnText:
     var add = true
     var p {.cursor.} = parent
@@ -185,6 +191,17 @@ proc extractContentBasic*(s: string, textOnly = false): string =
   var a: ParsedNode
   traverse(parsedNodes, tree, a)
   if parsedNodes.len == 0:
+    return
+  var idx = -1
+  for i, item in parsedNodes:
+    if item.articleBody == true:
+      idx = i
+      break
+  if idx != -1:
+    if textOnly:
+      result = strutils.strip(extractText(parsedNodes[idx].node))
+    else:
+      result = $parsedNodes[idx].node
     return
   for i, n in parsedNodes:
     n.index = i
