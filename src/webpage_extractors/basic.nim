@@ -15,11 +15,12 @@ type ParsedNode {.acyclic.} = ref object
   lc: int
   lt: int
   index: int
+  ds: float
   articleBody: bool
   parent: ParsedNode
 
 proc `$`*(n: ParsedNode): string =
-  fmt"""tag: {n.node.tag()}, id: {n.node.attr("id")}, class: {n.node.attr("class")}, nonLinkLen: {n.nonLinkLen}, textLen: {n.textLen}, pLen: {n.pLen}, depth: {n.depth}, index: {n.index}"""
+  fmt"""tag: {n.node.tag()}, id: {n.node.attr("id")}, class: {n.node.attr("class")}, nonLinkLen: {n.nonLinkLen}, textLen: {n.textLen}, pLen: {n.pLen}, ds: {n.ds}"""
 
 proc traverse(parsedNodes: var seq[ParsedNode], node: XmlNode, parent: ParsedNode = nil) =
   # const AvoidTags = ["head", "meta", "title", "link", "script", "select", "style"]
@@ -41,6 +42,12 @@ proc traverse(parsedNodes: var seq[ParsedNode], node: XmlNode, parent: ParsedNod
       for n in node:
         pnode.childLen.inc
         traverse(parsedNodes, n, pnode)
+      if pnode.allTextLen == 0:
+        pnode.ds = 0.0
+      elif pnode.childLen == 0:
+        pnode.ds = pnode.allTextLen / 1
+      else:
+        pnode.ds = pnode.allTextLen / pnode.childLen
       if parent != nil:
         parent.pLen.inc pnode.pLen
         parent.nonLinkLen.inc pnode.nonLinkLen
@@ -50,6 +57,7 @@ proc traverse(parsedNodes: var seq[ParsedNode], node: XmlNode, parent: ParsedNod
         parent.lt.inc pnode.lt
         parent.lc.inc pnode.lc
         parent.childLen.inc pnode.childLen
+        parent.ds = parent.ds + pnode.ds
 
   of xnText:
     var add = true
@@ -94,12 +102,13 @@ proc traverse(parsedNodes: var seq[ParsedNode], node: XmlNode, parent: ParsedNod
   of xnComment, xnVerbatimText, xnCData, xnEntity:
     discard
 
-proc traverseText(s: var string, node: XmlNode, parent: XmlNode = nil) =
+proc traverseText(s: var string, node: XmlNode, parent: XmlNode = nil, threshold = 0.0) =
   case node.kind
   of xnElement:
     let oldTextLen = s.len
     for n in node:
-      traverseText(s, n, node)
+      if n.kind == xnElement and n.innerText().len / n.len >= threshold or n.kind == xnText:
+        traverseText(s, n, node)
     s = unicode.strip(s)
     let textLen = s.len
     if textLen > 0 and htmlTag(node.tag()) in {tagP, tagDiv}:
@@ -130,8 +139,8 @@ proc traverseText(s: var string, node: XmlNode, parent: XmlNode = nil) =
   of xnComment, xnCData, xnVerbatimText:
     discard
 
-proc extractText(node: XmlNode): string =
-  traverseText(result, node, nil)
+proc extractText(node: XmlNode, threshold:float): string =
+  traverseText(result, node, nil, threshold)
 
 # proc findBody(s: string): string = 
 #   var x: XmlParser
@@ -218,16 +227,31 @@ proc extractContentBasic*(s: string, textOnly = false): string =
       break
   if idx != -1:
     if textOnly:
-      result = strutils.strip(extractText(parsedNodes[idx].node))
+      result = strutils.strip(extractText(parsedNodes[idx].node, 0.0))
     else:
       result = $parsedNodes[idx].node
     return
   for i, n in parsedNodes:
     n.index = i
+  var threshold: float
+  for n in parsedNodes:
+    # echo n.allTextLen / n.childLen
+    if n.ds > threshold:
+      threshold = n.ds
+
+  let hold = parsedNodes.filterIt(it.allTextLen / it.childLen >= threshold)
+  var threshold2 = threshold
+  if hold.len > 0:
+    var tmp: ParsedNode = hold[0]
+    while tmp != nil:
+      if tmp.allTextLen / tmp.childLen < threshold2:
+        threshold2 = tmp.allTextLen / tmp.childLen
+      tmp = tmp.parent
 
   let lcb = parsedNodes[0].lc
   let cb = parsedNodes[0].allTextLen
-  var filtered = parsedNodes.filterIt( htmlTag(it.node.tag()) notin {tagHtml, tagBody} and it.textLen > 0 and it.nonLinkLen > 0 and htmlTag(it.node.tag()) in (BlockTags + {tagUnknown}))
+  var filtered = parsedNodes.filterIt(  htmlTag(it.node.tag()) notin {tagHtml, tagBody} and it.textLen > 0 and it.nonLinkLen > 0 and htmlTag(it.node.tag()) in (BlockTags + {tagUnknown}))
+
   if filtered.len == 0:
     return
   var tmp: ParsedNode
@@ -257,11 +281,11 @@ proc extractContentBasic*(s: string, textOnly = false): string =
   # let m3 = filtered[int(ceil(filtered.len.float - 1.0) / 6)].index.float
   # / ln( abs(it.index.float - m3)  + 2)
   # var sorted = filtered.sortedByIt(computeScore2(it))
-  var sorted = filtered.sortedByIt( it.allTextLen / it.childLen * log(( (it.allTextLen / it.lc) * (it.childLen / it.lt) ), ln( it.allTextLen / it.textLen * it.lc.float + lcb / cb + E) ))
+  var sorted = filtered.sortedByIt( it.allTextLen / max(it.childLen, 1) * log(( (it.allTextLen / max(it.lc, 1)) * (it.childLen / max(it.lt, 1)) ), ln( it.allTextLen / it.textLen * it.lc.float + lcb / cb + E) ))
   # echo sorted
   let finalLen = sorted.len
   if finalLen > 0:
     if textOnly:
-      result = strutils.strip(extractText(sorted[finalLen - 1].node))
+      result = strutils.strip(extractText(sorted[finalLen - 1].node, threshold2))
     else:
       result = $sorted[finalLen - 1].node
