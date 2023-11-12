@@ -6,11 +6,14 @@ import std/htmlparser
 type ParsedNode {.acyclic.} = ref object
   node: XmlNode
   textLen: int
+  allTextLen: int
   childLen: int
   nonLinkLen: int
   depth: int
   punctuations: int
   pLen: int
+  lc: int
+  lt: int
   index: int
   articleBody: bool
   parent: ParsedNode
@@ -28,7 +31,7 @@ proc traverse(parsedNodes: var seq[ParsedNode], node: XmlNode, parent: ParsedNod
     pnode = new ParsedNode
     pnode.node = node
     pnode.parent = parent
-    pnode.childLen = node.len()
+    # pnode.childLen = node.len()
     parsedNodes.add pnode
     let attrs = node.attrs()
     if attrs != nil:
@@ -36,12 +39,18 @@ proc traverse(parsedNodes: var seq[ParsedNode], node: XmlNode, parent: ParsedNod
         pnode.articleBody = true
     if not pnode.articleBody:
       for n in node:
+        pnode.childLen.inc
         traverse(parsedNodes, n, pnode)
       if parent != nil:
         parent.pLen.inc pnode.pLen
         parent.nonLinkLen.inc pnode.nonLinkLen
         parent.textLen.inc pnode.textLen
         parent.punctuations.inc pnode.punctuations
+        parent.allTextLen.inc pnode.allTextLen
+        parent.lt.inc pnode.lt
+        parent.lc.inc pnode.lc
+        parent.childLen.inc pnode.childLen
+
   of xnText:
     var add = true
     var p {.cursor.} = parent
@@ -53,8 +62,9 @@ proc traverse(parsedNodes: var seq[ParsedNode], node: XmlNode, parent: ParsedNod
         p = p.parent
       else:
         break
+    let text = node.text()
     if add:
-      let text = node.text()
+      # let text = node.text()
       var count: int
       var startIdx: int
       for i in 0 ..< text.len:
@@ -73,6 +83,10 @@ proc traverse(parsedNodes: var seq[ParsedNode], node: XmlNode, parent: ParsedNod
       if text.len - count > 1:
         parent.pLen.inc
         parent.nonLinkLen.inc 1
+    else:
+      parent.lc.inc text.len
+      parent.lt.inc
+    parent.allTextLen.inc text.len
     # else:
     #   parent.nonLinkLen.inc 1
     #   parent.pLen.inc 1
@@ -183,9 +197,14 @@ proc computeScore(it: ParsedNode): float =
   let punctuationsDensity = float(ln(max( it.textLen / (it.punctuations + 1), 2).float))
   result = textDensity * textTagsScore * punctuationsDensity #* depthScore
 
+# proc computeScore2(it: ParsedNode): float =
+#   # body hyperlink characters / body
+#   result = it.allTextLen / it.childLen * log(ln( it.allTextLen / it.textLen * it.lc.float + E) * ( (it.allTextLen / it.lc) * (it.childLen / it.lt) ) )
+
 proc extractContentBasic*(s: string, textOnly = false): string =
   var errors = newSeq[string]()
   let tree = parseHtml(newStringStream(s.findBody()), "dum", errors)
+  # let tree = parseHtml(newStringStream(s), "dum", errors)
   # echo errors
   var parsedNodes = newSeq[ParsedNode]()
   var a: ParsedNode
@@ -206,6 +225,8 @@ proc extractContentBasic*(s: string, textOnly = false): string =
   for i, n in parsedNodes:
     n.index = i
 
+  let lcb = parsedNodes[0].lc
+  let cb = parsedNodes[0].allTextLen
   var filtered = parsedNodes.filterIt( htmlTag(it.node.tag()) notin {tagHtml, tagBody} and it.textLen > 0 and it.nonLinkLen > 0 and htmlTag(it.node.tag()) in (BlockTags + {tagUnknown}))
   if filtered.len == 0:
     return
@@ -235,7 +256,8 @@ proc extractContentBasic*(s: string, textOnly = false): string =
   # echo filtered
   # let m3 = filtered[int(ceil(filtered.len.float - 1.0) / 6)].index.float
   # / ln( abs(it.index.float - m3)  + 2)
-  var sorted = filtered.sortedByIt(computeScore(it))
+  # var sorted = filtered.sortedByIt(computeScore2(it))
+  var sorted = filtered.sortedByIt( it.allTextLen / it.childLen * log(( (it.allTextLen / it.lc) * (it.childLen / it.lt) ), ln( it.allTextLen / it.textLen * it.lc.float + lcb / cb + E) ))
   # echo sorted
   let finalLen = sorted.len
   if finalLen > 0:
